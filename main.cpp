@@ -3,68 +3,134 @@
 #include <string>
 #include <omp.h>
 #include <chrono>
-#define N 100000000 // Tamaño de la secuencia
-const std::string PATTERN = "ATGC"; // Patrón a buscar
+#include <cstdlib>   
+#include <cstring>   
+
+#define N 100000000 // Longitud de la secuencia
+
+const std::string PATTERN = "ATGC"; 
 const int P_LEN = PATTERN.length();
+
 using namespace std;
-// Función para simular una secuencia grande
+
+// Genera una secuencia aleatoria grande
 void generate_sequence(vector<char>& seq) {
-    // Rellenamos con bases aleatorias para simular una carga de trabajo real
-    // Insertamos el patrón cerca del final para forzar la búsqueda larga
     for (int i = 0; i < N - P_LEN; ++i) {
         seq[i] = "ATGC"[rand() % 4];
     }
-    // Aseguramos que el patrón exista al final para que la búsqueda no falle
+    // Se coloca el patrón cerca del final para garantizar al menos una coincidencia
     for (int i = 0; i < P_LEN; ++i) {
-        seq[N - 10000 + i] = PATTERN[i]; 
+        seq[N - 10000 + i] = PATTERN[i];
     }
 }
+
+// Verifica si existe el patrón en la posición i
+inline bool match_pattern(const vector<char>& seq, int i) {
+    for (int j = 0; j < P_LEN; ++j) {
+        if (seq[i + j] != PATTERN[j]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Ejecuta la búsqueda bajo distintos tipos de schedule
 void run_search(int num_threads, const char* schedule_type, int chunk_size) {
     vector<char> dna_sequence(N);
     generate_sequence(dna_sequence);
-    long long first_index = -1; 
+
+    long long first_index = -1;
     omp_set_num_threads(num_threads);
+
     auto start = chrono::high_resolution_clock::now();
-    //PCAM: Partitioning y Agglomeration
-    #pragma omp parallel for schedule(dynamic, chunk_size)
-    for (int i = 0; i < N - P_LEN; ++i) {
-        // Si ya se encontró el índice, salimos rápidamente (optimización)
-        if (first_index != -1) continue; 
-        // Buscar el patrón: Tarea computacional (Partitioning)
-        bool match = true;
-        for (int j = 0; j < P_LEN; ++j) {
-            if (dna_sequence[i + j] != PATTERN[j]) {
-                match = false;
-                break;
+
+    // Se elige la política de scheduling
+    if (strcmp(schedule_type, "static") == 0) {
+        #pragma omp parallel for schedule(static, chunk_size)
+        for (int i = 0; i < N - P_LEN; ++i) {
+            if (first_index != -1) continue;
+
+            bool match = match_pattern(dna_sequence, i);
+
+            if (match) {
+                #pragma omp critical
+                {
+                    if (first_index == -1 || i < first_index) {
+                        first_index = i;
+                    }
+                }
             }
         }
-        // Si se encuentra, comunicar el resultado
-        if (match) {
-            #pragma omp critical
-            {
-                // Solo actualizamos si es la primera ocurrencia (índice más bajo)
-                if (first_index == -1 || i < first_index) {
-                    first_index = i;
+    } else if (strcmp(schedule_type, "dynamic") == 0) {
+        #pragma omp parallel for schedule(dynamic, chunk_size)
+        for (int i = 0; i < N - P_LEN; ++i) {
+            if (first_index != -1) continue;
+
+            bool match = match_pattern(dna_sequence, i);
+
+            if (match) {
+                #pragma omp critical
+                {
+                    if (first_index == -1 || i < first_index) {
+                        first_index = i;
+                    }
+                }
+            }
+        }
+    } else if (strcmp(schedule_type, "guided") == 0) {
+        #pragma omp parallel for schedule(guided, chunk_size)
+        for (int i = 0; i < N - P_LEN; ++i) {
+            if (first_index != -1) continue;
+
+            bool match = match_pattern(dna_sequence, i);
+
+            if (match) {
+                #pragma omp critical
+                {
+                    if (first_index == -1 || i < first_index) {
+                        first_index = i;
+                    }
+                }
+            }
+        }
+    } else {
+        #pragma omp parallel for schedule(auto)
+        for (int i = 0; i < N - P_LEN; ++i) {
+            if (first_index != -1) continue;
+
+            bool match = match_pattern(dna_sequence, i);
+
+            if (match) {
+                #pragma omp critical
+                {
+                    if (first_index == -1 || i < first_index) {
+                        first_index = i;
+                    }
                 }
             }
         }
     }
+
     auto end = chrono::high_resolution_clock::now();
     chrono::duration<double> elapsed = end - start;
 
-    cout << "Hilos: " << num_threads 
-         << ", Schedule: " << schedule_type 
+    cout << "Hilos: " << num_threads
+         << ", Schedule: " << schedule_type
          << " (" << chunk_size << ")"
-         << ", Tiempo: " << elapsed.count() << " s" 
+         << ", Tiempo: " << elapsed.count() << " s"
          << ", Posición: " << first_index << endl;
 }
+
 int main() {
-    cout << "--- Búsqueda de Patron en ADN (" << PATTERN << ") ---" << endl;
-##############################
-run_search();
-run_search();
-run_search();
-run_search(); 
-#############################
+    cout << "--- Búsqueda de Patrón en ADN (" << PATTERN << ") ---" << endl;
+
+    int num_threads = 4;
+    int chunk_size  = 10000;
+
+    run_search(num_threads, "static",  chunk_size);
+    run_search(num_threads, "dynamic", chunk_size);
+    run_search(num_threads, "guided",  chunk_size);
+    run_search(num_threads, "auto",    chunk_size);
+
     return 0;
 }
